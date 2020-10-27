@@ -1,0 +1,198 @@
+**********************************************************
+                 R1    ssh -l admin -c aes128-cbc -p 22 10.141.141.2
+
+ip dns server
+************************************************************
+conf t
+hostname shar0519-r1
+int s0/0/0
+ip address 10.141.141.1 255.255.255.252
+no shut
+exit
+int g0/1
+ip address 192.168.141.1 255.255.255.0
+no shut
+exit
+int g0/2
+ip address 197.7.7.141 255.255.255.0
+no shut
+exit
+ip default-gateway 197.7.7.7
+
+! ip route 197.3.3.0 255.255.255.0 197.7.7.7
+
+ip route 0.0.0.0 0.0.0.0 197.7.7.7
+
+username admin privilege 15 algorithm-type scrypt secret class
+no ip domain-lookup
+
+
+! *********NTP Client***********************
+ntp authentication-key 1 md5 NTPpassword
+ntp trusted-key 1
+ntp authenticate
+ntp server 10.141.141.2
+ntp update-calendar
+
+*******ZPF********************************************
+! a. Creating Zone*********
+zone security Internal
+zone security External
+zone security DMZ
+
+
+! b. Creating class maps*******
+class-map type inspect match-any Internal-DMZ-Traffic
+match protocol http
+match protocol ssh
+match protocol ntp
+
+class-map type inspect match-any Internal-External-Traffic
+match protocol http
+match protocol tftp
+
+
+class-map type inspect match-any DMZ-External-Traffic
+match protocol tftp
+match protocol ntp
+
+class-map type inspect match-any External-DMZ-Traffic
+match protocol http
+
+
+! c. Creating Policy Maps
+policy-map type inspect Internal-DMZ-Policy
+class type inspect Internal-DMZ-Traffic
+inspect
+
+policy-map type inspect Internal-External-Policy
+class type inspect Internal-External-Traffic
+inspect
+
+policy-map type inspect DMZ-External-Policy
+class type inspect DMZ-External-Traffic
+inspect
+
+policy-map type inspect External-DMZ-Policy
+class type inspect External-DMZ-Traffic
+inspect
+
+! d. Creating the zone pairs
+zone-pair security Internal-DMZ source Internal destination DMZ
+service-policy type inspect Internal-DMZ-Policy
+
+zone-pair security Internal-External source Internal destination External
+service-policy type inspect Internal-External-Policy
+
+zone-pair security DMZ-External source DMZ destination External
+service-policy type inspect DMZ-External-Policy
+
+zone-pair security External-DMZ source External destination DMZ
+service-policy type inspect External-DMZ-Policy
+
+! d. Assigning zone to interfaces
+
+interface g0/1
+zone-member security Internal
+
+int s0/0/0
+zone-member security DMZ
+
+int g0/2
+zone-member security External
+
+
+
+*******************R2********************************************
+       R2			R2
+**********************************************************
+conf t
+hostname shar0519-r2
+int s0/0/0
+ip address 10.141.141.2 255.255.255.252
+no shut
+exit
+no ip domain-lookup
+ip default-gateway 10.141.141.1
+ip route 0.0.0.0 0.0.0.0 10.141.141.1
+
+
+! ************SSH server*************
+ip domain-name cst8249.lab
+username admin privilege 15 algorithm-type scrypt secret class
+
+line vty 0 4
+privilege level 15
+login local
+transport input ssh
+exit
+
+crypto key zeroize rsa
+
+crypto key generate rsa general-keys modulus 2048
+ip ssh version 2
+
+ip ssh server algorithm encryption 3des-cbc
+#copy running-config startup-config
+
+**********SCP*********
+
+aaa new-model
+aaa authentication login default local
+aaa authorization exec default local
+ip scp server enable
+
+#copy running-config R2-Config
+
+**********http/DNS*****************
+
+ip http server
+
+ip dns server
+
+***************NTP****************
+clock set 20:12:00 Oct 13 2020
+
+conf t
+ntp authentication-key 1 md5 NTPpassword
+ntp trusted-key 1
+ntp authenticate
+ntp master 3
+
+***********R3***********
+conf t
+hostname shar0519-r3
+int g0/2
+ip address 197.3.3.141 255.255.255.0
+no shut
+exit
+ip default-gateway 197.3.3.3
+
+username admin privilege 15 algorithm-type scrypt secret class
+no ip domain-lookup
+ip route 0.0.0.0 0.0.0.0 197.3.3.3
+
+
+
+*********S1***********
+conf t
+hostname shar0519-s1
+vlan 99
+int vlan 99
+ip address 192.168.141.3 255.255.255.0
+no shut
+exit
+
+int f0/5
+no shut
+switchport mode access
+switchport access vlan 99
+exit
+ip default-gateway 192.168.141.1
+
+! *********NTP Client***********************
+ntp authentication-key 1 md5 NTPpassword
+ntp trusted-key 1
+ntp authenticate
+ntp server 10.141.141.2
+ntp update-calendar
